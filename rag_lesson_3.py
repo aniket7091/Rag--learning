@@ -1,43 +1,73 @@
+# 1. import the transformer model
 from sentence_transformers import SentenceTransformer, util
+from groq import Groq
+import os
+
+clint = Groq(
+    api_key = os.environ.get("GROQ_API_KEY")
+)
 
 model = SentenceTransformer("all-MiniLM-L6-v2")
 
+#2. make the create-chunk function
+def create_chunk(text, chunk_size =2,overlap=1):
+    sentences = text.strip().split("\n")
+    chunk_data =[]
+    for i in range(0,len(sentences),chunk_size-overlap):
+        chunk_data.append(" ".join(sentences[i:i+chunk_size]))
 
-def chunk_text(text, chunk_size,overlap):
-    sentances = text.strip().split("\n")
-    chunked_data =[]
-    for i in range(0,len(sentances),chunk_size-overlap):
-        chunked_data.append(" ".join(sentances[i:i+chunk_size]))
+    return chunk_data
 
-    return chunked_data
-
-
-def retrive(question, chunks,doc_vec,k=2):
-
-    query_vec = model.encode(question)
+#3. create teh retrival function
+def retrive(question, chunks, doc_vec,k =2):
+    queary_vec = model.encode(question)
     result =[]
     for i in range(len(chunks)):
-        similrity = util.cos_sim(query_vec,doc_vec[i]).item()
-        result.append((similrity,chunks[i]))
+        similarity = util.cos_sim(queary_vec,doc_vec[i]).item()
+        result.append((similarity,chunks[i]))
 
-    result.sort(reverse= True)
-
+    result.sort(reverse=True)
     return result[:k]
 
 
+#4. create the build prompt function
+def build_prompt(question, result):
+    context =""
+
+    for score,doc in result:
+        context += doc + "\n"
+
+    prompt = f"""
+    Answer the question by using context below.
+
+    context = 
+    {context}
+
+    question = 
+    {question}
+
+   Answer :
+    """
+    return prompt
 
 
-# text = """
-# Python is a programming language.
-# It is easy to learn.
-# Python is used in web development.
-# Python is popular for machine learning.
-# Python has many libraries.
-# Python is used in data science.
-# """
+#5. now we are going to geerate the answer 
+def generate_answer(prompt):
 
+    response = clint.chat.completions.create(
+        model = "openai/gpt-oss-20b",
+        messages =[
+            {
+               "role" : "user",
+               "content" : prompt
+            }
+        ]
+    )
+    return response.choices[0].message.content
+    
+
+#4. give the knowledge base as a text
 text = """
-
 Dr. A.P.J. Abdul Kalam was an Indian aerospace scientist and the 11th President of India.
 He was born on 15 October 1931 in Rameswaram, Tamil Nadu.
 Dr. Kalam played an important role in India's space and missile development programs.
@@ -47,27 +77,27 @@ Dr. Kalam wrote several books, including Wings of Fire and Ignited Minds.
 He received the Bharat Ratna, India's highest civilian award, in 1997.
 """
 
-result = chunk_text(text= text, chunk_size=2,overlap=1)
-
-print(result)
-
-res_vec = model.encode(result)
-print(res_vec.shape)
+#5. create the embeeding of knowledge base
+chunk = create_chunk(text=text,chunk_size=2,overlap =1)
+print(chunk)
+print()
+doc_vec = model.encode(chunk)
+print("Embedding vector :",doc_vec.shape)
 print()
 
-# question = "What is Python used for?"
 
+#6 create the embedding of question
 question = "Which award did Dr. Kalam receive in 1997?"
+result = retrive(question=question,chunks=chunk,doc_vec=doc_vec,k=3)
 
-result1 = retrive(question=question, chunks=result,doc_vec=res_vec,k=2)
+#print the prompt output
+prompt = build_prompt(question=question,result=result)
 
-print("Question : ",question)
-for score, doc in result1:
-    
-    print("Document : ",doc)
-    print("Score : ",score)
-print("-"*80)
+print(prompt)
+print()
 
-
-
-
+# generate the response 
+answer = generate_answer(prompt=prompt)
+print("question : ", question)
+print()
+print("Answer : ",answer)
